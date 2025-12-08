@@ -130,6 +130,7 @@ curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644
 sudo snap install kubectl --classic
 
 # Configure kubectl
+kubectl get pod
 sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
 sudo chown $(id -u):$(id -g) ~/.kube/config
 
@@ -140,6 +141,7 @@ sudo snap install helm --classic
 # Activate gateway api in trakkif (instead of ingresss)
 
 Check before:
+kubectl get gatewayclass (should be empty)
 kubectl get svc -n kube-system
 kubectl get pod -n kube-system
 
@@ -147,7 +149,8 @@ You can customize the Traefik deployment using Helm Controller, which is include
 
 Here's the minimal values you'd need to change to enable Traefik's Gateway API:
 
-# /var/lib/rancher/k3s/server/manifests/traefik-config.yaml
+sudo -s
+vim /var/lib/rancher/k3s/server/manifests/traefik-config.yaml
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:
@@ -164,18 +167,10 @@ If you run into issues, you can troubleshoot using the logs of the helm-install-
 
 Edited to remove the redundant and deprecated experimental version of the flag
 
-
-
-# Install nginx Fabric Gateway
-kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/standard?ref=v2.2.1" | kubectl apply -f -
-
-# Install as load balancer (need to specify NodePort otherwise)
-helm install ngf oci://ghcr.io/nginx/charts/nginx-gateway-fabric --create-namespace -n nginx-gateway
-
-helm install ngf oci://ghcr.io/nginx/charts/nginx-gateway-fabric --create-namespace -n nginx-gateway --set nginx.service.type=NodePort --set service.nodePorts.http=30080 --set service.nodePorts.https=30443
-
-# Check installation
-kubectl wait --timeout=5m -n nginx-gateway deployment/ngf-nginx-gateway-fabric --for=condition=Available
+Check after:
+kubectl get gatewayclass (should have a value now)
+kubectl get svc -n kube-system
+kubectl get pod -n kube-system
 
 # create a folder for persistent volumne
 sudo mkdir /data
@@ -193,6 +188,18 @@ git clone ...
 
 cd k8s-...
 
+
+
+
+# set traefik gateway API nodeports
+kubectl apply -f traefik-customize.yaml
+
+sudo systemctl restart k3s
+
+check that port have changed:
+kubectl get svc traefik -n kube-system
+
+
 # ==========
 # Postgres
 # ==========
@@ -204,8 +211,7 @@ kubectl create secret generic postgres-secret --from-env-file=.env.dev
 kubectl apply -f postgres.yaml
 
 # test if postgres is running (WSL)
-sudo apt install postgresql-client-common
-sudo apt-get install postgresql-client
+sudo apt install postgresql-client-common postgresql-client
 
 psql -U postgres -h 10.42.0.1 -p 30700
 enter password (postgres)
@@ -219,8 +225,6 @@ sudo socat TCP4-LISTEN:5432,fork,bind=0.0.0.0 TCP4:10.42.0.1:30700 &
 # ===================
 # Gateway / Web:
 # ===================
-https://docs.nginx.com/nginx-gateway-fabric/traffic-management/https-termination/#overview
-
 
 # create demo app
 kubectl apply -f coffee.yaml
@@ -234,27 +238,34 @@ kubectl create secret tls cafe-secret -n=certificate --cert=localhost.crt --key=
 
 # create gateway and route
 kubectl apply -f gateway.yaml
+kubectl apply -f access-secret.yaml
 kubectl apply -f route.yaml
 
-# get ip address of node
-kubectl get nodes -o wide
+# get external ip address of traefik gateway
+kubectl get pods,svc -n kube-system
+NAME                                          READY   STATUS      RESTARTS   AGE
+pod/coredns-6d668d687-l9ddp                   1/1     Running     0          8m55s
+pod/helm-install-traefik-crd-9gmqz            0/1     Completed   0          8m55s
+pod/helm-install-traefik-p8dv7                0/1     Completed   0          5m27s
+pod/local-path-provisioner-869c44bfbd-hmqsh   1/1     Running     0          8m55s
+pod/metrics-server-7bfffcd44-4ngpj            1/1     Running     0          8m55s
+pod/svclb-traefik-baedc382-rkdlm              2/2     Running     0          8m41s
+pod/traefik-6f4947d4bd-6jwlj                  1/1     Running     0          5m26s
+
+NAME                     TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+service/kube-dns         ClusterIP      10.43.0.10     <none>          53/UDP,53/TCP,9153/TCP       8m58s
+service/metrics-server   ClusterIP      10.43.11.29    <none>          443/TCP                      8m58s
+service/traefik          LoadBalancer   10.43.119.67   172.23.72.183   80:30355/TCP,443:32679/TCP   8m41s
+
+kubectl get nodes -o wide (alternative method)
 
 NAME        STATUS   ROLES                  AGE     VERSION        INTERNAL-IP     EXTERNAL-IP   OS-IMAGE             KERNEL-VERSION                       CONTAINER-RUNTIME
 mflaptop1   Ready    control-plane,master   2d19h   v1.33.6+k3s1   172.23.72.183   <none>        Ubuntu 24.04.3 LTS   5.15.167.4-microsoft-standard-WSL2   containerd://2.1.5-k3s1.33
 
-# get NodePort for cafe-nginx service
-kubectl get svc
-
-NAME         TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)                      AGE
-cafe-nginx   LoadBalancer   10.43.66.236   <pending>     80:32659/TCP,443:31698/TCP   43h
-coffee       ClusterIP      10.43.45.91    <none>        80/TCP                       43h
-kubernetes   ClusterIP      10.43.0.1      <none>        443/TCP                      43h
-
-
 # test http redirect (WSL)
-GW_IP=10.42.0.1
-GW_HTTP_PORT=32659
-GW_HTTPS_PORT=31698
+GW_IP=172.23.72.183
+GW_HTTP_PORT=30080
+GW_HTTPS_PORT=30443
 curl --resolve app.mylocaldomaindev.com:$GW_HTTP_PORT:$GW_IP http://app.mylocaldomaindev.com:$GW_HTTP_PORT/coffee --include
 
 # test https connection (WSL)
@@ -265,8 +276,8 @@ curl --resolve app.mylocaldomaindev.com:$GW_HTTPS_PORT:$GW_IP https://app.myloca
 curl --resolve app.mylocaldomaindev.com:31698:172.23.72.183 https://app.mylocaldomaindev.com:31698/coffee --insecure
 
 # forward port (80/443) to NodePort (powerhsell with eleveated priviledges)
-kubec
-netsh interface portproxy add v4tov4 listenport=80 listenaddress=127.0.0.1 connectport=32659 connectaddress=172.23.72.183
+netsh interface portproxy add v4tov4 listenport=80 listenaddress=127.0.0.1 connectport=30080 connectaddress=172.23.72.183
+netsh interface portproxy add v4tov4 listenport=443 listenaddress=127.0.0.1 connectport=30443 connectaddress=172.23.72.183
 
 delete routes:
 netsh interface portproxy delete v4tov4 listenport=80 listenaddress=127.0.0.1
