@@ -6,13 +6,14 @@ metadata:
     type: local
     app: postgres
 spec:
+  storageClassName: manual
   capacity:
     storage: 5Gi
   persistentVolumeReclaimPolicy: Retain
   accessModes:
     - ReadWriteOnce
   hostPath:
-    path: /data/postgres
+    path: /data/pv/postgres
   # storageClassName: local-storage
 ---
 apiVersion: v1
@@ -23,12 +24,13 @@ metadata:
   labels:
     app: postgres
 spec:
+  storageClassName: manual
   accessModes:
     - ReadWriteOnce
   resources:
     requests:
       storage: 5Gi  # Adjust size
-  storageClassName: local-storage
+  # storageClassName: local-storage
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -49,8 +51,8 @@ spec:
       - name: postgres
         image: postgres:14.1
         envFrom:
-        - configMapRef:
-            name: postgres-configmap
+        # - configMapRef:
+        #     name: postgres-configmap
         - secretRef:
             name: postgres-secret
         ports:

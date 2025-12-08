@@ -33,3 +33,10 @@ spec:
     backendRefs:
     - name: coffee
       port: 80
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /
+    backendRefs:
+    - name: test
+      port: 80
