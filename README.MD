@@ -84,7 +84,7 @@ cp app.mylocaldomaindev.com.key ./dev/localhost.key
 # ========================
 
 # Install WSL2
-- Start App "Ubunut 24.04.1 LTS"
+- Start App "Ubuntu 24.04.1 LTS"
 - Define usename and passoword for WSL2
 
 # Upgrade to latest version
@@ -95,20 +95,20 @@ sudo apt-get upgrade
 # Install docker
 # ===================
 
-Add docker key
+# Add docker key
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 
-Add docker stable repository
+# Add docker stable repository
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
 
-sudo apt-get update
+# sudo apt-get update
 
-Install docker and docker-compose
+# Install docker and docker-compose
 sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 sudo systemctl is-active docker
 
-Add non-root user to docker group
+# Add non-root user to docker group
 sudo usermod -aG docker ${USER}
 
 # ===================
@@ -136,6 +136,36 @@ sudo chown $(id -u):$(id -g) ~/.kube/config
 # Helm
 sudo snap install helm --classic
 
+
+# Activate gateway api in trakkif (instead of ingresss)
+
+Check before:
+kubectl get svc -n kube-system
+kubectl get pod -n kube-system
+
+You can customize the Traefik deployment using Helm Controller, which is included with k3s.
+
+Here's the minimal values you'd need to change to enable Traefik's Gateway API:
+
+# /var/lib/rancher/k3s/server/manifests/traefik-config.yaml
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesGateway:
+        enabled: true
+Write that yaml to a file under /var/lib/rancher/k3s/server/manifests/ and it will be automatically picked up and applied by Helm Controller. There is no need to restart k3s.
+
+If you run into issues, you can troubleshoot using the logs of the helm-install-traefik job in the kube-system namespace.
+
+Edited to remove the redundant and deprecated experimental version of the flag
+
+
+
 # Install nginx Fabric Gateway
 kubectl kustomize "https://github.com/nginx/nginx-gateway-fabric/config/crd/gateway-api/standard?ref=v2.2.1" | kubectl apply -f -
 
@@ -144,16 +174,16 @@ helm install ngf oci://ghcr.io/nginx/charts/nginx-gateway-fabric --create-namesp
 
 helm install ngf oci://ghcr.io/nginx/charts/nginx-gateway-fabric --create-namespace -n nginx-gateway --set nginx.service.type=NodePort --set service.nodePorts.http=30080 --set service.nodePorts.https=30443
 
-
 # Check installation
 kubectl wait --timeout=5m -n nginx-gateway deployment/ngf-nginx-gateway-fabric --for=condition=Available
 
-
 # create a folder for persistent volumne
-sudo mkdir /data/pv/postgres
-cd /data/pv
+sudo mkdir /data
+cd /data
+sudo mkdir pv
+cd pv
+sudo mkdir postgres
 sudo chmod 777 postgres
-
 
 # Replicate project
 cd ~
@@ -163,7 +193,9 @@ git clone ...
 
 cd k8s-...
 
+# ==========
 # Postgres
+# ==========
 
 # create secret
 kubectl create secret generic postgres-secret --from-env-file=.env.dev
@@ -171,41 +203,38 @@ kubectl create secret generic postgres-secret --from-env-file=.env.dev
 # apply postgres configuration (will create storage and postgres)
 kubectl apply -f postgres.yaml
 
-# test if postgres is running
+# test if postgres is running (WSL)
 sudo apt install postgresql-client-common
 sudo apt-get install postgresql-client
 
 psql -U postgres -h 10.42.0.1 -p 30700
 enter password (postgres)
 
+# Test is postgres can be accessed (windows)
+sudo apt install socat
+sudo socat TCP4-LISTEN:5432,fork,bind=0.0.0.0 TCP4:10.42.0.1:30700 &
 
-# Create tls secret
-kubectl create secret tls access-to-cafe-secret -n=certificate --cert=localhost.crt --key=localhost.key
-
-
+# Try connecting from DBeaver in Windows (port 5432)
 
 # ===================
-# Commands to run:
+# Gateway / Web:
 # ===================
 https://docs.nginx.com/nginx-gateway-fabric/traffic-management/https-termination/#overview
 
 
 # create demo app
 kubectl apply -f coffee.yaml
+kubectl apply -f test.yaml
 kubectl get pods,svc
 
-# base64 encode certificates (in certificate.yaml)
-cat ~/certs/dev/localhost.key | base64
-cat ~/certs/dev/localhost.crt | base64
-
-# create certificate
-kubectl apply -f certificate.yaml
-kubectl apply -f access_secret.yaml
+# Create tls secret
+Copy certificate to project path (or other path), ensure they are excluded from GIT
+kubectl create namespace certificate
+kubectl create secret tls cafe-secret -n=certificate --cert=localhost.crt --key=localhost.key
 
 # create gateway and route
 kubectl apply -f gateway.yaml
 kubectl apply -f route.yaml
-
 
 # get ip address of node
 kubectl get nodes -o wide
@@ -236,16 +265,12 @@ curl --resolve app.mylocaldomaindev.com:$GW_HTTPS_PORT:$GW_IP https://app.myloca
 curl --resolve app.mylocaldomaindev.com:31698:172.23.72.183 https://app.mylocaldomaindev.com:31698/coffee --insecure
 
 # forward port (80/443) to NodePort (powerhsell with eleveated priviledges)
-netsh interface portproxy add v4tov4 listenport=443 listenaddress=127.0.0.1 connectport=31698 connectaddress=172.23.72.183
+kubec
 netsh interface portproxy add v4tov4 listenport=80 listenaddress=127.0.0.1 connectport=32659 connectaddress=172.23.72.183
 
 delete routes:
 netsh interface portproxy delete v4tov4 listenport=80 listenaddress=127.0.0.1
 netsh interface portproxy delete v4tov4 listenport=443 listenaddress=127.0.0.1
-
-# add port forward for postgresql (WSL)
-sudo socat TCP4-LISTEN:5432,fork,bind=0.0.0.0 TCP4:10.42.0.1:30700 &
-
 
 # from browswer (in windows)
 https://app.mylocaldomaindev.com/coffee
