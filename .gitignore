@@ -1,2 +1,4 @@
 localhost.crt
 localhost.key
+*.pyc
+__pycache__/

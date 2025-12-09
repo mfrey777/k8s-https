@@ -286,6 +286,40 @@ netsh interface portproxy delete v4tov4 listenport=443 listenaddress=127.0.0.1
 # from browswer (in windows)
 https://app.mylocaldomaindev.com/coffee
 
+# =====================
+# Add FastApi Backend
+# =====================
+
+# build locally
+docker build -f backend/DockerfileServerDev.dockerfile -t fdpr-backend-dev:latest ./backend
+
+# save and import into k3s containerd
+docker save fdpr-backend-dev:latest -o /tmp/fdpr-backend-dev.tar
+sudo k3s ctr -n k8s.io images import /tmp/fdpr-backend-dev.tar
+rm /tmp/fdpr-backend-dev.tar
+
+# Add FastApi Backend
+kubectl apply -f backend.yaml
+
+# restart
+kubectl rollout restart deployment/backend
+kubectl get pods
+
+
+# Alternative (use local docker registry)
+# start a local registry
+docker run -d --restart=always -p 5000:5000 --name registry registry:2
+
+# build + push
+docker build -f backend/DockerfileServerDev.dockerfile -t localhost:5000/fdpr-backend-dev:latest ./backend
+docker push localhost:5000/fdpr-backend-dev:latest
+
+# update k8s/backend.yaml to use localhost:5000/fdpr-backend-dev:latest and imagePullPolicy: IfNotPresent
+kubectl apply -f k8s/backend.yaml
+kubectl rollout restart deployment/backend
+
+# from browswer (in windows)
+https://app.mylocaldomaindev.com/api
 
 # ===================
 # Cleanup
